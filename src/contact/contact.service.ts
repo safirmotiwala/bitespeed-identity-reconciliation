@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service'; // Assuming you have a PrismaService that encapsulates the Prisma client operations
-import { IdentifyRequestDto, ContactDto } from './contact.dto';
+import { IdentifyRequestDto, ContactDto } from './dtos/contact.dtos';
 import { Contact } from '@prisma/client';
 
 @Injectable()
@@ -8,22 +8,19 @@ export class ContactService {
   constructor(private readonly prisma: PrismaService) {}
 
   async reconcile(data: IdentifyRequestDto): Promise<ContactDto> {
-    let contacts: Contact[] = [];
-
+    const filters = [];
     if (data.email) {
-      const emailContacts = await this.prisma.contact.findMany({
-        where: { email: data.email },
-      });
-      contacts = [...contacts, ...emailContacts];
+      filters.push({ email: data.email });
     }
     if (data.phoneNumber) {
-      const phoneNumberContacts = await this.prisma.contact.findMany({
-        where: { phoneNumber: data.phoneNumber },
-      });
-      contacts = [...contacts, ...phoneNumberContacts];
+      filters.push({ phoneNumber: data.phoneNumber });
     }
+
+    const contacts = await this.prisma.contact.findMany({
+      where: { OR: filters },
+    });
+
     if (!contacts.length) {
-      // If no contacts are found, create a new primary contact
       const newContact = await this.prisma.contact.create({
         data: {
           email: data.email,
@@ -32,69 +29,61 @@ export class ContactService {
         },
       });
       return this.constructContactDto([newContact]);
-    } else {
-      contacts.sort((a, b) => (a.createdAt > b.createdAt ? 1 : -1));
+    }
 
-      // Find the primary contact
-      const primaryContact = contacts[0];
+    contacts.sort((a, b) => (a.createdAt > b.createdAt ? 1 : -1));
+    const primaryContact = contacts[0];
 
-      if (contacts.every((contact) => contact.linkPrecedence === 'primary')) {
-        // If all contacts are the primary contact, keep the first one and update the rest
-        const [firstContact, ...restContacts] = contacts;
-        await this.prisma.contact.updateMany({
-          where: {
-            id: {
-              in: restContacts.map((contact) => contact.id),
-            },
-          },
-          data: {
-            linkedId: firstContact.id,
-            linkPrecedence: 'secondary',
-          },
-        });
-
-        return this.constructContactDto([
-          firstContact,
-          ...(restContacts.map((contact) => ({
-            ...contact,
-            linkedId: firstContact.id,
-            linkPrecedence: 'secondary',
-          })) as Contact[]),
-        ]);
-      }
-
-      // If the incoming contact is not linked, create a secondary contact linked to the primary contact
-      else if (
-        contacts.some(
-          (contact) =>
-            contact.email === data.email ||
-            contact.phoneNumber === data.phoneNumber,
-        )
-      ) {
-        await this.prisma.contact.create({
-          data: {
-            email: data.email,
-            phoneNumber: data.phoneNumber,
-            linkPrecedence: 'secondary',
-            linkedId: primaryContact.id,
-          },
-        });
-      }
-
-      const filters = [
-        { linkedId: primaryContact.id },
-        primaryContact.linkedId && { id: primaryContact.linkedId },
-      ];
-
-      // Fetch all contacts linked to the primary contact
-      const allLinkedContacts = await this.prisma.contact.findMany({
+    if (contacts.every((contact) => contact.linkPrecedence === 'primary')) {
+      const [firstContact, ...restContacts] = contacts;
+      await this.prisma.contact.updateMany({
         where: {
-          OR: filters.filter(Boolean),
+          id: {
+            in: restContacts.map((contact) => contact.id),
+          },
+        },
+        data: {
+          linkedId: firstContact.id,
+          linkPrecedence: 'secondary',
         },
       });
-
-      return this.constructContactDto([primaryContact, ...allLinkedContacts]);
+      return this.constructContactDto([
+        firstContact,
+        ...(restContacts.map((contact) => ({
+          ...contact,
+          linkedId: firstContact.id,
+          linkPrecedence: 'secondary',
+        })) as Contact[]),
+      ]);
     }
+
+    if (
+      contacts.some(
+        (contact) =>
+          contact.email === data.email ||
+          contact.phoneNumber === data.phoneNumber,
+      )
+    ) {
+      await this.prisma.contact.create({
+        data: {
+          email: data.email,
+          phoneNumber: data.phoneNumber,
+          linkPrecedence: 'secondary',
+          linkedId: primaryContact.id,
+        },
+      });
+    }
+
+    const allLinkedContacts = await this.prisma.contact.findMany({
+      where: {
+        OR: [
+          { linkedId: primaryContact.id },
+          primaryContact.linkedId && { id: primaryContact.linkedId },
+        ].filter(Boolean),
+      },
+    });
+
+    return this.constructContactDto([primaryContact, ...allLinkedContacts]);
   }
 
   private constructContactDto(contacts: Array<Contact>): ContactDto {
