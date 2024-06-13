@@ -17,3 +17,6 @@ CREATE TABLE "Contact" (
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Contact_linkedId_key" ON "Contact"("linkedId");
+
+-- DropIndex
+DROP INDEX "Contact_linkedId_key";
