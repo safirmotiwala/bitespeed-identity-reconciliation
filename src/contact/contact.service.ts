@@ -34,7 +34,10 @@ export class ContactService {
     contacts.sort((a, b) => (a.createdAt > b.createdAt ? 1 : -1));
     const primaryContact = contacts[0];
 
-    if (contacts.every((contact) => contact.linkPrecedence === 'primary')) {
+    if (
+      contacts.length > 1 &&
+      contacts.every((contact) => contact.linkPrecedence === 'primary')
+    ) {
       const [firstContact, ...restContacts] = contacts;
       await this.prisma.contact.updateMany({
         where: {
