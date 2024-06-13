@@ -65,6 +65,11 @@ export class ContactService {
         (contact) =>
           contact.email === data.email ||
           contact.phoneNumber === data.phoneNumber,
+      ) &&
+      !contacts.some(
+        (contact) =>
+          contact.email === data.email &&
+          contact.phoneNumber === data.phoneNumber,
       )
     ) {
       await this.prisma.contact.create({
